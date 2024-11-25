@@ -1,0 +1,16 @@
+name: new-release
+on:
+  workflow_dispatch:
+
+jobs:
+  bash-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Run release script
+        run: bash release.sh
