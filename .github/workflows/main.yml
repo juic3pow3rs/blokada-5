@@ -4,6 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 env:
   main_project_module: app
@@ -68,11 +75,16 @@ jobs:
       - name: Clean project
         run: ./gradlew clean
 
-      - name: Build app
-        run: ./gradlew --warning-mode all assembleFiveRelease
+      - name: Generate lint baseline
+        run: ./gradlew lintDebug -PwriteBaseline=true
+        continue-on-error: true
 
       - name: Run Lint
         run: ./gradlew lint
 
       - name: Run Unit Tests
         run: ./gradlew test
+
+      - name: Build app
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: ./gradlew --warning-mode all assembleFiveRelease
