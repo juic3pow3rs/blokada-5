@@ -1,42 +1,75 @@
 name: Generate Lint Baseline
-
 on:
   workflow_dispatch:
+
+env:
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
 jobs:
   baseline:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # allow pushing a branch
+      contents: write
       pull-requests: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repo
+        uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: actions/setup-java@v3
+          fetch-depth: 0
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
         with:
           distribution: temurin
           java-version: '11'
-      # (reuse your Android SDK install steps)
 
-      - name: Generate baseline
-        run: ./gradlew :app:updateLintBaseline
-
-      - name: Commit baseline
+      - name: Install Android SDK + NDK
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b chore/lint-baseline
-          git add app/lint-baseline.xml
-          git commit -m "chore(lint): add baseline generated in CI"
-          git push -u origin chore/lint-baseline
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          curl -fo sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q sdk-tools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.0" \
+            "ndk;24.0.8215888" \
+            "cmake;3.22.1"
 
-      - name: Open PR
+      - name: Set up env / local.properties
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> $GITHUB_ENV
+          echo "${ANDROID_HOME}/platform-tools" >> $GITHUB_PATH
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/24.0.8215888" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/24.0.8215888" >> $GITHUB_ENV
+          echo "sdk.dir=${ANDROID_HOME}" > ./local.properties
+          echo "ndk.dir=${ANDROID_HOME}/ndk/24.0.8215888" >> ./local.properties
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      # Try the generic task first; if your AGP doesn't have it,
+      # fall back to updating the exact failing variant.
+      - name: Generate baseline
+        run: |
+          ./gradlew :app:updateLintBaseline || ./gradlew :app:lintEscapedDebug --update-baseline
+
+      - name: Verify baseline exists
+        run: |
+          test -f app/lint-baseline.xml && head -n 20 app/lint-baseline.xml || (echo "No baseline produced"; exit 1)
+
+      - name: Open PR with baseline
         uses: peter-evans/create-pull-request@v6
         with:
           title: "chore(lint): add baseline generated in CI"
           branch: chore/lint-baseline
           commit-message: "chore(lint): add baseline generated in CI"
-          body: "Baseline created by CI so future lint failures only reflect new issues."
+          add-paths: app/lint-baseline.xml
+          body: |
+            Baseline generated in CI. From now on, lint will only fail on new issues.
 
