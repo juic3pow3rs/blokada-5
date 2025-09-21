@@ -1,0 +1,42 @@
+name: Generate Lint Baseline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # allow pushing a branch
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '11'
+      # (reuse your Android SDK install steps)
+
+      - name: Generate baseline
+        run: ./gradlew :app:updateLintBaseline
+
+      - name: Commit baseline
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/lint-baseline
+          git add app/lint-baseline.xml
+          git commit -m "chore(lint): add baseline generated in CI"
+          git push -u origin chore/lint-baseline
+
+      - name: Open PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: "chore(lint): add baseline generated in CI"
+          branch: chore/lint-baseline
+          commit-message: "chore(lint): add baseline generated in CI"
+          body: "Baseline created by CI so future lint failures only reflect new issues."
+
