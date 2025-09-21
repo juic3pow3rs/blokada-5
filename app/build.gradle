@@ -42,6 +42,15 @@ android {
         }
     }
 
+    lint {
+        baseline file("lint-baseline.xml")
+        abortOnError true         // still fail CI
+        checkReleaseBuilds true
+        warningsAsErrors false    // keep warnings as warnings for now
+        htmlReport true
+        textReport true
+    }
+    
     buildTypes {
         debug {
             // By default it is a 'debuggable' build, signed with a debug key.
