@@ -53,11 +53,10 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      # Try the generic task first; if your AGP doesn't have it,
-      # fall back to updating the exact failing variant.
-      - name: Generate baseline
+      - name: Generate baseline (variant task)
         run: |
-          ./gradlew :app:updateLintBaseline || ./gradlew :app:lintEscapedDebug --update-baseline
+          ./gradlew :app:lintEscapedDebug --update-baseline
+
 
       - name: Verify baseline exists
         run: |
