@@ -53,8 +53,9 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Generate baseline for EscapedDebug
-        run: ./gradlew :app:lintEscapedDebug --update-baseline
+      - name: Create baseline with Gradle (non-failing first run)
+        run: |
+          ./gradlew :app:lintEscapedDebug -Dlint.baselines.continue=true || true
 
       - name: Verify baseline exists
         run: |
