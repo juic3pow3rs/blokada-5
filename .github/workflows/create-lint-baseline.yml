@@ -53,10 +53,13 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Generate baseline (variant task)
+      - name: Generate baseline with Lint CLI
         run: |
-          ./gradlew :app:lintEscapedDebug --update-baseline
-
+          # Run lint against the app module and write a baseline
+          $ANDROID_HOME/cmdline-tools/latest/bin/lint \
+            --quiet \
+            --write-reference-baseline app/lint-baseline.xml \
+            app
 
       - name: Verify baseline exists
         run: |
