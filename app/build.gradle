@@ -54,6 +54,8 @@ android {
     buildTypes {
         debug {
             // By default it is a 'debuggable' build, signed with a debug key.
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
         }
 
         release {
