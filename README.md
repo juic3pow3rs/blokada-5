@@ -2,7 +2,9 @@
 
 Blokada 5 is the well known open source mobile ad blocker and privacy app.
 
-Want to try it out? **[Click here to download Blokada](https://go.blokada.org/download_section)**.
+>Status: AI-supported, not actively maintained. This fork was initiated after blokada discontinued the development of 5 in favor of 6. It is maintained on a best-effort basis with AI assistance.
+>Dependabot keeps dependencies and security advisories up to date automatically (patch and minor bumps auto-merge; majors require manual review).
+>Feature work, bug fixes, and other changes happen on a best-effort basis. Pull requests and issues are welcome — they may take time to be reviewed.
 
 ## Difference to Blokada 6
 
