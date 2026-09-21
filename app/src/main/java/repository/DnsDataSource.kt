@@ -56,47 +56,6 @@ object DnsDataSource {
             label = "AdGuard: family"
         ),
         Dns(
-            id = "ahadns.au",
-            ips = listOf("103.73.64.132", "2406:ef80:100:11::11"),
-            port = 443,
-            name = "doh.au.ahadns.net",
-            path = "dns-query",
-            label = "AhaDNS (Australia)",
-            region = "other"
-        ),
-        Dns(
-            id = "ahadns.chi",
-            ips = listOf("193.29.62.196", "2605:4840:3:c4::c4"),
-            port = 443,
-            name = "doh.chi.ahadns.net",
-            path = "dns-query",
-            label = "AhaDNS (Chicago)",
-            region = "northamerica"
-        ),
-        Dns(
-            id = "ahadns.nl",
-            ips = listOf("5.2.75.75", "2a04:52c0:101:75::75"),
-            port = 443,
-            name = "doh.nl.ahadns.net",
-            path = "dns-query",
-            label = "AhaDNS (Netherlands)",
-            region = "europe"
-        ),
-        Dns(
-            id = "ahadns.no",
-            ips = listOf("185.175.56.133", "2a0d:5600:30:28::28"),
-            port = 443,
-            name = "doh.no.ahadns.net",
-            path = "dns-query",
-            label = "AhaDNS (Norway)",
-            region = "europe"
-        ),
-        Dns.plaintextDns(
-            id = "alternate",
-            ips = listOf("76.76.19.19", "76.223.122.150", "2001:4801:7825:103:be76:4eff:fe10:2e49", "2001:4800:780e:510:a8cf:392e:ff04:8982"),
-            label = "Alternate DNS"
-        ),
-        Dns(
             id = "artikel10",
             ips = listOf("217.197.91.153", "2001:67c:1401:2120::1"),
             port = 443,
@@ -124,7 +83,7 @@ object DnsDataSource {
         ),
         Dns.plaintextDns(
             id = "digitalcourage",
-            ips = listOf("5.9.164.112", "2a01:4f8:251:554::2"),
+            ips = listOf("46.182.19.48", "2a02:2970:1002::18"),
             label = "Digitalcourage",
             region = "europe"
         ),
@@ -191,10 +150,22 @@ object DnsDataSource {
 //            ips = listOf("80.80.80.80", "80.80.81.81"),
 //            label = "Freenom"
 //        ),
-        Dns.plaintextDns(
+        Dns(
             id = "fdn",
-            ips = listOf("80.67.169.12", "80.67.169.40"),
+            ips = listOf("80.67.169.12", "2001:910:800::12"),
+            port = 443,
+            name = "ns0.fdn.fr",
+            path = "dns-query",
             label = "French Data Network",
+            region = "europe"
+        ),
+        Dns(
+            id = "fdn.secondary",
+            ips = listOf("80.67.169.40", "2001:910:800::40"),
+            port = 443,
+            name = "ns1.fdn.fr",
+            path = "dns-query",
+            label = "French Data Network: secondary",
             region = "europe"
         ),
         Dns(
@@ -243,10 +214,23 @@ object DnsDataSource {
             ips = listOf("101.101.101.101", "101.102.103.104", "2001:de4::101", "2001:de4::102"),
             label = "Quad 101"
         ),
-        Dns.plaintextDns(
+        Dns(
             id = "uncensored",
-            ips = listOf("91.239.100.100", "89.233.43.71"),
-            label = "Uncensored DNS"
+            ips = listOf("91.239.100.100", "2001:67c:28a4::"),
+            port = 443,
+            name = "anycast.censurfridns.dk",
+            path = "dns-query",
+            label = "Uncensored DNS",
+            region = "europe"
+        ),
+        Dns(
+            id = "uncensored.dk",
+            ips = listOf("89.233.43.71", "2a01:3a0:53:53::"),
+            port = 443,
+            name = "unicast.censurfridns.dk",
+            path = "dns-query",
+            label = "Uncensored DNS (Denmark)",
+            region = "europe"
         ),
         Dns.plaintextDns(
             id = "verisign",
