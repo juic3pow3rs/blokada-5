@@ -55,6 +55,11 @@ object DnsDataSource {
             ips = listOf("94.140.14.15", "94.140.15.16", "2a10:50c0::bad1:ff", "2a10:50c0::bad2:ff"),
             label = "AdGuard: family"
         ),
+        Dns.plaintextDns(
+            id = "alternate",
+            ips = listOf("44.222.89.164"),
+            label = "Alternate DNS"
+        ),
         Dns(
             id = "artikel10",
             ips = listOf("217.197.91.153", "2001:67c:1401:2120::1"),
