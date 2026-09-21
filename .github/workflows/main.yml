@@ -104,10 +104,11 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Install dnspython
-        run: python -m pip install --upgrade pip && pip install dnspython
-      
-      - name: Run host DNS checks
+      - name: Install DNS test dependencies
+        run: python -m pip install --upgrade pip && pip install "dnspython" "httpx[http2]"
+
+      - name: Run host DNS checks (non-blocking, upstream servers may be down)
         run: |
           chmod +x tools/ci/test_dns.py
           ./tools/ci/test_dns.py --kotlin-path app/src/main/java/repository/DnsDataSource.kt
+        continue-on-error: true
