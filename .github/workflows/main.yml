@@ -142,7 +142,17 @@ jobs:
             echo "Build unexpectedly produced a signed APK" >&2
             exit 1
           fi
-          "$zipalign" -c -P 16 -v 4 unsigned.apk
+          # -P page-aligns uncompressed .so files to 16 KiB (16 KB page support,
+          # required since Android 15); requires build-tools 35+. Fall back to
+          # -p (4 KiB page alignment) on build-tools 34, which lacks -P.
+          if "$zipalign" -c -P 16 -v 4 unsigned.apk 2>/dev/null; then
+            echo "zipalign -P 16 check passed"
+          elif "$zipalign" -c -p -v 4 unsigned.apk; then
+            echo "zipalign -p check passed (build-tools without -P 16 support)"
+          else
+            echo "zipalign check failed" >&2
+            exit 1
+          fi
           unzip -Z1 unsigned.apk > apk-entries.txt
           if grep -Fxq 'assets/adi-registration.properties' apk-entries.txt; then
             echo "Developer verification registration must not be included in a release build" >&2
