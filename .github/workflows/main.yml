@@ -39,14 +39,16 @@ jobs:
           curl -fo sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
           unzip -q sdk-tools.zip -d $ANDROID_HOME/cmdline-tools
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          # sdkmanager prompts for license acceptance on stdin; piping 'yes'
-          # trips pipefail ('Broken pipe') when sdkmanager exits early, so
-          # close stdin instead and accept licenses non-interactively.
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses </dev/null >/dev/null || true
+          # sdkmanager needs licenses accepted before installing anything.
+          # Piping 'yes' trips pipefail ('Broken pipe'), and </dev/null makes
+          # it skip unaccepted packages, so generate the answer stream in a
+          # subshell that tolerates sdkmanager exiting early.
+          (yes y || true) | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null
+
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "platform-tools" \
             "platforms;android-34" \
-            "build-tools;34.0.0" </dev/null
+            "build-tools;34.0.0"
 
           # Runner images rotate their preinstalled NDKs, so install the one app/build.gradle pins.
           ndk_version="$(sed -n 's/^ *ndkVersion \"\(.*\)\"$/\1/p' app/build.gradle)"
@@ -54,7 +56,7 @@ jobs:
             echo "Could not read ndkVersion from app/build.gradle" >&2
             exit 1
           fi
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${ndk_version}" </dev/null
+          (yes y || true) | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${ndk_version}"
 
       - name: Set up environment variables
         run: |
