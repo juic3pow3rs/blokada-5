@@ -61,9 +61,10 @@ jobs:
       - name: Locate installed NDK and export paths
         run: |
           set -euo pipefail
-          # sdkmanager extracts NDK r26+ into android-ndk-rXX under ndk/, not
-          # into ndk/<version>; resolve the real directory once.
-          ndk_dir="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d -name 'android-ndk*' | sort -V | tail -1)"
+          # Resolve the installed NDK directory: depending on sdkmanager
+          # version it extracts to ndk/<version> or ndk/android-ndk-rXX.
+          ndk_dir="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d \
+            \( -name 'android-ndk*' -o -name '[0-9]*' \) -exec test -f '{}/source.properties' \; -print | sort -V | tail -1)"
           if [ -z "${ndk_dir}" ]; then
             echo "No NDK directory found under ${ANDROID_HOME}/ndk" >&2
             ls -la "${ANDROID_HOME}/ndk" >&2 || true
