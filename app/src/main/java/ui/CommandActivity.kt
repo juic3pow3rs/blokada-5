@@ -154,6 +154,7 @@ class CommandService : IntentService("cmd") {
 
             ctx.startActivity(Intent(ACTION_VIEW, it.data).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                setPackage(ctx.packageName)
             })
         }
     }

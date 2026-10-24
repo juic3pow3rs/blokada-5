@@ -13,6 +13,7 @@
 package service
 
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import model.*
@@ -22,7 +23,11 @@ import ui.executeCommand
 import ui.utils.cause
 import ui.utils.openInBrowser
 import utils.Logger
+import utils.NotificationChannels
+import utils.RepoMessageNotification
 import utils.UpdateNotification
+import java.net.URI
+import java.time.LocalDate
 
 object UpdateService {
 
@@ -35,8 +40,13 @@ object UpdateService {
     private val scope = GlobalScope
 
     private var updateInfo: BlockaRepoUpdate? = null
+    private var messageInfo: BlockaRepoMessage? = null
+    private var libreModeForUpdate = false
+    private var updateDownloadInProgress = false
+    private var messageDeferredForExternalAction = false
 
     fun checkForUpdate(config: BlockaRepoConfig): Boolean {
+        this.updateInfo = null
         if (config.update == null) return false
         val updateInfo = config.update
         val versionCode = versionToVersionCode(updateInfo.newest)
@@ -53,15 +63,48 @@ object UpdateService {
         } else false
     }
 
+    fun checkForMessage(config: BlockaRepoConfig) {
+        val message = config.message
+        when (repoMessageEligibility(
+            message = message,
+            seenId = persistence.load(BlockaRepoMessage::class).id,
+            today = LocalDate.now()
+        )) {
+            RepoMessageEligibility.ELIGIBLE -> {
+                log.v("Repo message pending: ${message!!.id}")
+                messageInfo = message
+            }
+            RepoMessageEligibility.INVALID_EXPIRY -> {
+                log.w("Could not parse message expiry: ${message?.expires}")
+                messageInfo = null
+                cancelRepoMessageNotification()
+            }
+            else -> {
+                messageInfo = null
+                cancelRepoMessageNotification()
+            }
+        }
+    }
+
     fun handleUpdateFlow(
         onOpenDonate: () -> Unit,
         onOpenMore: () -> Unit,
-        onOpenChangelog: () -> Unit
+        onOpenChangelog: () -> Unit,
+        libreMode: Boolean
     ) {
+        libreModeForUpdate = libreMode
         val appVersion = EnvironmentService.getVersionCode()
         if (!hasUserSeenAfterUpdateDialog(appVersion)) {
-            markUserSeenAfterUpdateDialog(appVersion)
-            showThankYouAlert(onOpenDonate, onOpenMore, onOpenChangelog)
+            val shown = showThankYouAlert(onOpenDonate, onOpenMore, onOpenChangelog) {
+                showUpdateAlertIfNecessary()
+            }
+            when (shown) {
+                AlertShowResult.SHOWN -> markUserSeenAfterUpdateDialog(appVersion)
+                AlertShowResult.BUSY -> alert.runAfterCurrentDialog {
+                    handleUpdateFlow(onOpenDonate, onOpenMore, onOpenChangelog, libreMode)
+                }
+                AlertShowResult.FAILED -> Unit
+            }
         } else {
             // This is in else branch to make sure only one dialog can show at once
             showUpdateAlertIfNecessary()
@@ -74,18 +117,53 @@ object UpdateService {
         }
     }
 
-    fun showUpdateAlertIfNecessary(libreMode: Boolean = false) {
+    fun showBackgroundNotificationsIfNecessary() {
+        showUpdateNotificationIfNecessary()
+        showRepoMessageNotificationIfNecessary()
+    }
+
+    @Synchronized
+    private fun showRepoMessageNotificationIfNecessary() {
+        val msg = messageInfo ?: return
+        val seenId = persistence.load(BlockaRepoMessage::class).id
+        val notifiedId = persistence.load(BlockaRepoMessageNotification::class).messageId
+        if (!shouldNotifyRepoMessage(msg, seenId, notifiedId, LocalDate.now())) return
+        if (!notification.hasPermissions(NotificationChannels.ANNOUNCEMENT)) {
+            log.w("Announcement notifications are disabled")
+            return
+        }
+
+        try {
+            notification.show(RepoMessageNotification(msg))
+            persistence.save(BlockaRepoMessageNotification(msg.id))
+        } catch (ex: Exception) {
+            log.e("Could not show repo message notification".cause(ex))
+        }
+    }
+
+    fun showUpdateAlertIfNecessary(libreMode: Boolean? = null) {
+        libreMode?.let { libreModeForUpdate = it }
+        if (!hasUserSeenAfterUpdateDialog(env.getVersionCode())) return
         updateInfo?.let {
             val ctx = context.requireContext()
             alert.showAlert(
                 message = ctx.getString(R.string.alert_update_body, "5"), // Blokada 5
                 title = ctx.getString(R.string.notification_update_header),
                 positiveAction = ctx.getString(R.string.universal_action_download) to {
+                    updateDownloadInProgress = true
                     showUpdatingAlert(it.infoUrl)
                     scope.launch {
-                        if (libreMode) deactivateBeforeDownload()
-                        UpdateDownloaderService.installUpdate(it.mirrors) {
-                            alert.dismiss()
+                        if (libreModeForUpdate) deactivateBeforeDownload()
+                        UpdateDownloaderService.installUpdate(it.mirrors) { succeeded ->
+                            scope.launch(Dispatchers.Main) {
+                                updateDownloadInProgress = false
+                                messageDeferredForExternalAction =
+                                    messageDeferredForExternalAction || succeeded
+                                alert.dismiss()
+                                if (!succeeded && !messageDeferredForExternalAction) {
+                                    showPendingMessageIfNecessary()
+                                }
+                            }
                         }
                     }
                 },
@@ -95,8 +173,62 @@ object UpdateService {
                 onDismiss = {
                     notification.cancel(UpdateNotification(it.newest))
                     updateInfo = null
+                    if (!updateDownloadInProgress) showPendingMessageIfNecessary()
                 }
-            )
+            ).also { result ->
+                if (result == AlertShowResult.BUSY) {
+                    alert.runAfterCurrentDialog { showUpdateAlertIfNecessary() }
+                }
+            }
+        }
+        if (updateInfo == null && hasUserSeenAfterUpdateDialog(env.getVersionCode())) {
+            showPendingMessageIfNecessary()
+        }
+    }
+
+    private fun showPendingMessageIfNecessary(): Boolean {
+        if (messageDeferredForExternalAction) return false
+        val msg = messageInfo ?: return false
+        if (repoMessageEligibility(
+                message = msg,
+                seenId = persistence.load(BlockaRepoMessage::class).id,
+                today = LocalDate.now()
+            ) != RepoMessageEligibility.ELIGIBLE
+        ) {
+            messageInfo = null
+            cancelRepoMessageNotification()
+            return false
+        }
+        val ctx = context.requireContext()
+        val url = validRepoMessageUrl(msg.url)
+        val shown = alert.showAlert(
+            message = msg.body,
+            title = msg.title,
+            positiveAction = if (url != null) {
+                ctx.getString(R.string.universal_action_learn_more) to {
+                    openInBrowser(url)
+                }
+            } else null
+        )
+        when (shown) {
+            AlertShowResult.SHOWN -> {
+                persistence.save(msg)
+                cancelRepoMessageNotification()
+                if (messageInfo == msg) messageInfo = null
+            }
+            AlertShowResult.BUSY -> alert.runAfterCurrentDialog { showPendingMessageIfNecessary() }
+            AlertShowResult.FAILED -> Unit
+        }
+        return shown == AlertShowResult.SHOWN
+    }
+
+    fun onAppResumed() {
+        messageDeferredForExternalAction = false
+        if (!hasUserSeenAfterUpdateDialog(env.getVersionCode())) return
+        if (updateInfo != null) {
+            showUpdateAlertIfNecessary()
+        } else {
+            showPendingMessageIfNecessary()
         }
     }
 
@@ -116,10 +248,16 @@ object UpdateService {
             },
             additionalAction = ctx.getString(R.string.universal_action_open_in_browser) to {
                 UpdateDownloaderService.cancelUpdate()
+                messageDeferredForExternalAction = true
+                updateDownloadInProgress = false
                 openInBrowser(url)
             },
             onDismiss = {
                 UpdateDownloaderService.cancelUpdate()
+                if (updateDownloadInProgress) {
+                    updateDownloadInProgress = false
+                    showPendingMessageIfNecessary()
+                }
             }
         )
     }
@@ -127,11 +265,12 @@ object UpdateService {
     private fun showThankYouAlert(
         onOpenDonate: () -> Unit,
         onOpenMore: () -> Unit,
-        onOpenChangelog: () -> Unit
-    ) {
+        onOpenChangelog: () -> Unit,
+        onDismiss: () -> Unit
+    ): AlertShowResult {
         val ctx = context.requireContext()
         val showDonate = EnvironmentService.isLibre() && !EnvironmentService.isSlim()
-        alert.showAlert(
+        return alert.showAlert(
             message = ctx.getString(
                 if (showDonate) R.string.update_desc_updated else R.string.update_desc_updated_nodon
             ),
@@ -141,7 +280,8 @@ object UpdateService {
                 else ctx.getString(R.string.universal_action_close) to {},
             additionalAction =
                 if (showDonate) ctx.getString(R.string.universal_action_learn_more) to onOpenMore
-                else ctx.getString(R.string.universal_action_learn_more) to onOpenChangelog
+                else ctx.getString(R.string.universal_action_learn_more) to onOpenChangelog,
+            onDismiss = onDismiss
         )
     }
 
@@ -156,8 +296,15 @@ object UpdateService {
     }
 
     fun resetSeenUpdate() {
-        log.v("Resetting seen update mark")
+        log.v("Resetting seen update and message marks")
         persistence.save(Defaults.noSeenUpdate())
+        persistence.save(Defaults.noSeenMessage())
+        persistence.save(Defaults.noNotifiedMessage())
+        cancelRepoMessageNotification()
+    }
+
+    private fun cancelRepoMessageNotification() {
+        notification.cancel(RepoMessageNotification(Defaults.noSeenMessage()))
     }
 
     private fun hasUserSeenAfterUpdateDialog(appVersion: Int): Boolean {
@@ -203,4 +350,53 @@ object UpdateService {
         }
     }
 
+}
+
+internal enum class RepoMessageEligibility {
+    ELIGIBLE,
+    MISSING_FIELDS,
+    ALREADY_SEEN,
+    EXPIRED,
+    INVALID_EXPIRY
+}
+
+internal fun repoMessageEligibility(
+    message: BlockaRepoMessage?,
+    seenId: String,
+    today: LocalDate
+): RepoMessageEligibility {
+    if (message == null || message.id.isBlank() || message.title.isBlank() || message.body.isBlank()) {
+        return RepoMessageEligibility.MISSING_FIELDS
+    }
+    if (message.id == seenId) return RepoMessageEligibility.ALREADY_SEEN
+    val expires = message.expires ?: return RepoMessageEligibility.ELIGIBLE
+    val expiry = try {
+        LocalDate.parse(expires)
+    } catch (_: Exception) {
+        return RepoMessageEligibility.INVALID_EXPIRY
+    }
+    return if (expiry.isBefore(today)) RepoMessageEligibility.EXPIRED
+    else RepoMessageEligibility.ELIGIBLE
+}
+
+internal fun validRepoMessageUrl(url: Uri?): Uri? {
+    if (url == null) return null
+    return try {
+        val parsed = URI(url)
+        if (parsed.scheme.equals("https", ignoreCase = true) &&
+            !parsed.host.isNullOrBlank() && parsed.userInfo == null
+        ) url else null
+    } catch (_: Exception) {
+        null
+    }
+}
+
+internal fun shouldNotifyRepoMessage(
+    message: BlockaRepoMessage?,
+    seenId: String,
+    notifiedId: String,
+    today: LocalDate
+): Boolean {
+    return repoMessageEligibility(message, seenId, today) == RepoMessageEligibility.ELIGIBLE &&
+        message!!.id != notifiedId
 }
