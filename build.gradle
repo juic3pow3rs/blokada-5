@@ -35,14 +35,6 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven {
-            url "https://maven.aliyun.com/repository/jcenter"
-            content {
-                includeGroup "com.akexorcist"
-                includeGroup "com.twofortyfouram"
-                includeGroup "io.paperdb"
-            }
-        }
     }
 
     configurations.all {
