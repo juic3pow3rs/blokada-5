@@ -1,0 +1,23 @@
+{
+  "syntaxVersion": 1,
+  "common": {
+    "name": "common",
+    "forBuild": "common",
+    "supportedLanguages": ["en"],
+    "update": {
+      "mirrors": [
+        "https://github.com/juic3pow3rs/blokada-5/releases/download/v26.1.0/blokada5-26.1.0.apk"
+      ],
+      "infoUrl": "https://github.com/juic3pow3rs/blokada-5/releases/tag/v26.1.0",
+      "newest": "26.1.0"
+    },
+    "message": {
+      "id": "2026-10-fork-notice",
+      "title": "Unofficial build",
+      "body": "This is an unofficial community build of Blokada, maintained independently of Blocka AB.",
+      "url": "https://github.com/juic3pow3rs/blokada-5",
+      "expires": "2027-12-31"
+    }
+  },
+  "buildConfigs": []
+}

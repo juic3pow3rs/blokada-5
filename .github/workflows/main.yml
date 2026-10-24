@@ -1,61 +1,87 @@
-name: Blokada 5 for Android (CI)
+name: Blokada 5 CI
+run-name: Build ${{ github.sha }}
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
-  main_project_module: app
   ANDROID_HOME: ${{ github.workspace }}/android-sdk
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
-      - name: Check out repo
+      - name: Check out source
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Set up JDK 11
-        uses: actions/setup-java@v3
+      - name: Set up JDK
+        uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '11'
+          distribution: temurin
+          java-version: 17
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew
-
-      - name: Install Android SDK
+      - name: Install pinned NDK
         run: |
+          set -euo pipefail
           mkdir -p $ANDROID_HOME/cmdline-tools
           curl -fo sdk-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-          unzip sdk-tools.zip -d $ANDROID_HOME/cmdline-tools
+          unzip -q sdk-tools.zip -d $ANDROID_HOME/cmdline-tools
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          echo "Installing SDK components..."
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          # sdkmanager needs licenses accepted before installing anything.
+          # Piping 'yes' trips pipefail ('Broken pipe'), and </dev/null makes
+          # it skip unaccepted packages, so generate the answer stream in a
+          # subshell that tolerates sdkmanager exiting early.
+          (yes y || true) | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null
+
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "platform-tools" \
-            "platforms;android-33" \
-            "build-tools;33.0.0" \
-            "ndk;24.0.8215888" \
-            "cmake;3.22.1"
+            "platforms;android-34" \
+            "build-tools;34.0.0"
 
-      - name: Set up environment variables
+          # Runner images rotate their preinstalled NDKs, so install the one app/build.gradle pins.
+          ndk_version="$(sed -n 's/^ *ndkVersion \"\(.*\)\"$/\1/p' app/build.gradle)"
+          if [ -z "$ndk_version" ]; then
+            echo "Could not read ndkVersion from app/build.gradle" >&2
+            exit 1
+          fi
+          (yes y || true) | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;${ndk_version}"
+
+      - name: Locate installed NDK and export paths
         run: |
+          set -euo pipefail
+          # Resolve the installed NDK directory: depending on sdkmanager
+          # version it extracts to ndk/<version> or ndk/android-ndk-rXX.
+          ndk_dir="$(find "${ANDROID_HOME}/ndk" -mindepth 1 -maxdepth 1 -type d \
+            \( -name 'android-ndk*' -o -name '[0-9]*' \) -exec test -f '{}/source.properties' \; -print | sort -V | tail -1)"
+          if [ -z "${ndk_dir}" ]; then
+            echo "No NDK directory found under ${ANDROID_HOME}/ndk" >&2
+            ls -la "${ANDROID_HOME}/ndk" >&2 || true
+            exit 1
+          fi
+          echo "Found NDK at ${ndk_dir}"
           echo "ANDROID_HOME=${ANDROID_HOME}" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> $GITHUB_ENV
           echo "${ANDROID_HOME}/platform-tools" >> $GITHUB_PATH
-          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/24.0.8215888" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/24.0.8215888" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=${ndk_dir}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${ndk_dir}" >> $GITHUB_ENV
+          echo "ndk_dir=${ndk_dir}" >> $GITHUB_ENV
 
       - name: Create local.properties
         run: |
           echo "sdk.dir=${ANDROID_HOME}" > ./local.properties
-          echo "ndk.dir=${ANDROID_HOME}/ndk/24.0.8215888" >> ./local.properties
+          echo "ndk.dir=${ndk_dir}" >> ./local.properties
 
       - name: Cache Gradle packages
         uses: actions/cache@v3
@@ -67,37 +93,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Clean project
-        run: ./gradlew clean
+      - name: Test and build unsigned APK
+        run: ./gradlew --no-daemon testFiveDebugUnitTest assembleFiveRelease
 
-      - name: Build app (debug) & lint
-        run: ./gradlew --warning-mode all :app:assembleFiveDebug :app:lint
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk
-          path: |
-            app/build/outputs/apk/**/five/debug/*.apk
-            app/build/outputs/apk/**/*.apk
-
-      - name: Upload Lint HTML
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-html
-          path: app/build/reports/lint-results-*.html
-
-      - name: Upload Lint Text
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-text
-          path: app/build/intermediates/lint_intermediate_text_report/**/lint-results-*.txt
-
-      - name: Run Unit Tests (non-blocking for now)
-        run: ./gradlew test
-        continue-on-error: true
+      - name: Lint
+        run: ./gradlew --no-daemon :app:lint
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -112,3 +112,98 @@ jobs:
           chmod +x tools/ci/test_dns.py
           ./tools/ci/test_dns.py --kotlin-path app/src/main/java/repository/DnsDataSource.kt
         continue-on-error: true
+
+      - name: Verify unsigned APK
+        id: verify
+        env:
+          EXPECTED_PACKAGE: org.blokada.origin.alarm
+        run: |
+          set -euo pipefail
+
+          mapfile -t apks < <(find app/build/outputs/apk/five/release -maxdepth 1 -type f -name '*.apk')
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "Expected exactly one unsigned release APK, found ${#apks[@]}" >&2
+            exit 1
+          fi
+          cp "${apks[0]}" unsigned.apk
+
+          build_tools="$(find "${ANDROID_HOME}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          apksigner="$build_tools/apksigner"
+          aapt="$build_tools/aapt"
+          zipalign="$build_tools/zipalign"
+          for tool in "$apksigner" "$aapt" "$zipalign"; do
+            if [ ! -x "$tool" ]; then
+              echo "Android SDK tool is unavailable: $tool" >&2
+              exit 1
+            fi
+          done
+
+          if "$apksigner" verify unsigned.apk >/dev/null 2>&1; then
+            echo "Build unexpectedly produced a signed APK" >&2
+            exit 1
+          fi
+          # -P page-aligns uncompressed .so files to 16 KiB (16 KB page support,
+          # required since Android 15); requires build-tools 35+. Fall back to
+          # -p (4 KiB page alignment) on build-tools 34, which lacks -P.
+          if "$zipalign" -c -P 16 -v 4 unsigned.apk 2>/dev/null; then
+            echo "zipalign -P 16 check passed"
+          elif "$zipalign" -c -p -v 4 unsigned.apk; then
+            echo "zipalign -p check passed (build-tools without -P 16 support)"
+          else
+            echo "zipalign check failed" >&2
+            exit 1
+          fi
+          unzip -Z1 unsigned.apk > apk-entries.txt
+          if grep -Fxq 'assets/adi-registration.properties' apk-entries.txt; then
+            echo "Developer verification registration must not be included in a release build" >&2
+            exit 1
+          fi
+
+          "$aapt" dump badging unsigned.apk > badging.txt
+          badging="$(head -1 badging.txt)"
+          package_name="$(sed -n "s/.*package: name='\([^']*\)'.*/\1/p" <<< "$badging")"
+          version_name="$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<< "$badging")"
+          version_code="$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<< "$badging")"
+          if [ "$package_name" != "$EXPECTED_PACKAGE" ]; then
+            echo "Unexpected package: $package_name" >&2
+            exit 1
+          fi
+
+          sha256sum unsigned.apk > unsigned.apk.sha256
+          jq -n \
+            --arg source_sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg package_name "$package_name" \
+            --arg version_name "$version_name" \
+            --arg version_code "$version_code" \
+            --arg build_tools_version "$(basename "$build_tools")" \
+            '{source_sha: $source_sha, run_id: $run_id, run_attempt: $run_attempt, package_name: $package_name, version_name: $version_name, version_code: $version_code, build_tools_version: $build_tools_version}' \
+            > build-metadata.json
+
+          echo "version_name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "version_code=$version_code" >> "$GITHUB_OUTPUT"
+
+      - name: Upload unsigned build
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-apk-${{ github.run_id }}
+          path: |
+            unsigned.apk
+            unsigned.apk.sha256
+            build-metadata.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+      - name: Summarize build
+        run: |
+          {
+            echo "### Unsigned build"
+            echo "- Version: \`${{ steps.verify.outputs.version_name }}\`"
+            echo "- Version code: \`${{ steps.verify.outputs.version_code }}\`"
+            echo "- Source commit: \`$GITHUB_SHA\`"
+            echo "- Build run: \`$GITHUB_RUN_ID\`, attempt \`$GITHUB_RUN_ATTEMPT\`"
+            echo ""
+            echo "Download the unsigned-apk artifact to sideload, or sign locally with your own key."
+          } >> "$GITHUB_STEP_SUMMARY"
