@@ -14,7 +14,7 @@ async-std = { version = "1.5", features = ["attributes"] }
 util = { path = "../util" }
 log = "0.4"
 futures = "0.3"
-tokio = { version = "0.2", features = ["rt-core", "rt-threaded", "macros", "io-util", "uds", "stream"] }
+tokio = { version = "1.54", features = ["rt-core", "rt-threaded", "macros", "io-util", "uds", "stream"] }
 lazy_static = "1.4"
 
 [features]
